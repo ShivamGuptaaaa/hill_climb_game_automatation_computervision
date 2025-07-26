@@ -1,108 +1,84 @@
+# Hand Detection Project for Game Automation
 import cv2
 import mediapipe as mp
 import time
-from directkeys import right_pressed,left_pressed
-from directkeys import PressKey, ReleaseKey
+from directkeys import RIGHT_ARROW_SCANCODE, LEFT_ARROW_SCANCODE
+from directkeys import PressKey, ReleaseKey  
 
+# Key definitions
+brake_key = LEFT_ARROW_SCANCODE
+gas_key = RIGHT_ARROW_SCANCODE
 
-break_key_pressed=left_pressed
-accelerato_key_pressed=right_pressed
+time.sleep(2.0)  # Delay before starting
+current_keys_pressed = set()
 
-time.sleep(2.0)
-current_key_pressed = set()
-
-
+# MediaPipe setup
 mp_draw = mp.solutions.drawing_utils
-mp_hand = mp.solutions.hands
+mp_hands = mp.solutions.hands
 
 tipIds = [4, 8, 12, 16, 20]
 
-video = cv2.VideoCapture(1)
+video = cv2.VideoCapture(0)
 
-with mp_hand.Hands(max_num_hands=1 ,min_detection_confidence=0.5,
-                   min_tracking_confidence=0.5) as hands:
-      while True:
-        keyPressed = False
-        break_pressed=False
-        accelerator_pressed=False
-        key_count=0
-        key_pressed=0
-        ret, image = video.read()
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image.flags.writeable = False
-        results = hands.process(image)
-        image.flags.writeable = True
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        lmlist = []
-        if results.multi_hand_landmarks:
-            for hand_landmark in results.multi_hand_landmarks:
-                myHands = results.multi_hand_landmarks[0]
-                for id, lm in enumerate(myHands.landmark):
-                    h,w,c = image.shape 
+with mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7) as hands:
+    while True:
+        key_pressed = None
+        ret, frame = video.read()
+        frame = cv2.flip(frame, 1)  # Mirror the camera
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
+        result = hands.process(rgb)
+        rgb.flags.writeable = True
+        frame = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+        lmList = []
+        if result.multi_hand_landmarks:
+            for handLms in result.multi_hand_landmarks:
+                for id, lm in enumerate(handLms.landmark):
+                    h, w, c = frame.shape
                     cx, cy = int(lm.x * w), int(lm.y * h)
-                    # print(id, cx, cy)
-                    lmlist.append([id, cx, cy])
-                mp_draw.draw_landmarks(image, hand_landmark, mp_hand.HAND_CONNECTIONS)
+                    lmList.append([id, cx, cy])
+                mp_draw.draw_landmarks(frame, handLms, mp_hands.HAND_CONNECTIONS)
+
         fingers = []
-        if len(lmlist) != 0:
-            if lmlist[tipIds[0]][1] > lmlist[tipIds[0]-1][1]:
+        if lmList:
+            # Thumb
+            if lmList[tipIds[0]][1] > lmList[tipIds[0] - 1][1]:
                 fingers.append(1)
             else:
                 fingers.append(0)
-                # print("Thumb is open")
-            # else:
-            #     print("Thumb is closed")
+            # Fingers
             for id in range(1, 5):
-                if lmlist[tipIds[id]][2] < lmlist[tipIds[id]-2][2]:
-                    # print("open")
+                if lmList[tipIds[id]][2] < lmList[tipIds[id] - 2][2]:
                     fingers.append(1)
                 else:
-                    # print("closed")
                     fingers.append(0)
-            total = fingers.count(1)
-            # print(total)
-            if total == 0:
-                # print("BRAKE")
-                cv2.rectangle(image, (20, 300), (270, 425), (0, 255, 0), cv2.FILLED)
-                cv2.putText(image, "BRAKE", (45, 375), cv2.FONT_HERSHEY_SIMPLEX,
-                    2, (255, 0, 0), 5)
-                PressKey(break_key_pressed)
-                break_pressed=True
-                current_key_pressed.add(break_key_pressed)
-                key_pressed=break_key_pressed
-                keyPressed = True
-                key_count=key_count+1
-            elif total == 5:
-                # print("GAS")
-                cv2.rectangle(image, (20, 300), (270, 425), (0, 255, 0), cv2.FILLED)
-                cv2.putText(image, "  GAS", (45, 375), cv2.FONT_HERSHEY_SIMPLEX,
-                    2, (255, 0, 0), 5)
-                PressKey(accelerato_key_pressed)
-                key_pressed=accelerato_key_pressed
-                accelerator_pressed=True
-                keyPressed = True
-                current_key_pressed.add(accelerato_key_pressed)
-                key_count=key_count+1
-        if not keyPressed and len(current_key_pressed) != 0:
-            for key in current_key_pressed:
-                ReleaseKey(key)
-            current_key_pressed = set()
-        elif key_count==1 and len(current_key_pressed)==2:    
-            for key in current_key_pressed:             
-                if key_pressed!=key:
+
+            total_fingers = fingers.count(1)
+
+            if total_fingers == 5:
+                cv2.putText(frame, "GAS", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 4)
+                PressKey(gas_key)
+                key_pressed = gas_key
+
+            elif total_fingers == 0:
+                cv2.putText(frame, "BRAKE", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+                PressKey(brake_key)
+                key_pressed = brake_key
+
+        # Release previous key if different
+        if key_pressed:
+            for key in current_keys_pressed:
+                if key != key_pressed:
                     ReleaseKey(key)
-            current_key_pressed = set()
-            for key in current_key_pressed:
+            current_keys_pressed = {key_pressed}
+        else:
+            for key in current_keys_pressed:
                 ReleaseKey(key)
-            current_key_pressed = set()
-            
-            # if lmlist[8][2] < lmlist[6][2]:
-            #     print("Open")
-            # else:
-            #     print("Closed")
-        cv2.imshow("Frame", image)
-        k=cv2.waitKey(1)
-        if k == ord('q'):
+            current_keys_pressed = set()
+
+        cv2.imshow("Frame", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
 video.release()
